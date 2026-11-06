@@ -32,8 +32,9 @@ library(here)
 theme_set(theme_minimal())
 options(dplyr.summarise.inform = FALSE, scipen = 999)
 
-# Keep this path relative so the document works after cloning the project.
-data_dir <- here("Data")
+# Raw source files are stored in the project's tables/ folder. Keep this path
+# relative so the document works after cloning the project.
+data_dir <- here("tables")
 ```
 
 ## 1. Project goal and data sources
@@ -77,16 +78,16 @@ the raw-row level because doing so can duplicate records. Transactional datasets
 | File | Row represents / type | Unique key and links | Rows / unique constituents | Coverage | Data-quality findings |
 |---|---|---|---|---|---|
 | `constituents_w_memberships.csv` | One constituent snapshot; attribute table | Constituent ID; referenced by most datasets | 196,167 / 196,167 | End-of-data snapshot; no dates | No missing or duplicate IDs; no duplicate rows; ages are 0–120. |
-| `unite_payments.csv` | One payment; transaction table | payment_id; donor_id → Constituent ID; marketing_code → campaign code | 1,722,698 / 71,643 IDs (71,642 matched constituents + SYN-ORPHAN) | FY2021–FY2026, 2020-07-01 to 2026-06-30 | IDs and rows are unique. donor_id is SYN-ORPHAN in 33,733 rows. 1,086 zero-dollar payments need review. |
-| `team_approach_legacy_payments.csv` | One legacy gift/payment; transaction table | No unique transaction ID. ta_account_id is a repeating household account; constituent_id_1–_7 → Constituent ID | 1,202,857 / 109,284 linked constituents | 1983-07-26 to 2020-06-28, pre-FY2021 | No exact duplicate rows; all amounts positive. 216,128 rows have no linked constituent, which is an allowed legacy-data exception. |
-| `soft_credits.csv` | One soft credit; transaction table | Credit ID; Soft Credit Constituent ID → Constituent ID | 4,145 / 3,028 IDs (3,027 matched + SYN-ORPHAN) | FY2021–FY2026, 2020-07-01 to 2026-06-29 | 79 exact duplicate rows / repeated Credit IDs; 79 SYN-ORPHAN recipients; 34 zero-dollar credits need review. |
+| `unite_payments.csv` | One payment; transaction table | payment_id; donor_id → Constituent ID; marketing_code → campaign code | 1,722,698 / 71,643 IDs (71,642 matched constituents + SYN-ORPHAN) | FY2021–FY2026, 2020-07-01 to 2026-06-30 | Content-based valid-twin checks remove 36,044 invalid-link or nonpositive copies; 1,686,654 rows remain. Synthetic labels are audit-only. |
+| `team_approach_legacy_payments.csv` | One legacy gift/payment; transaction table | No unique transaction ID. ta_account_id is a repeating household account; constituent_id_1–_7 → Constituent ID | 1,202,857 / 109,284 linked constituents | 1983-07-26 to 2020-06-28, pre-FY2021 | All amounts are positive. Cleaning removes 216,128 rows with no linked constituent before allocation, leaving 986,729 retained rows. |
+| `soft_credits.csv` | One soft credit; transaction table | Credit ID; Soft Credit Constituent ID → Constituent ID | 4,145 / 3,028 IDs (3,027 matched + SYN-ORPHAN) | FY2021–FY2026, 2020-07-01 to 2026-06-29 | Exact duplicates are removed first; valid-twin checks then remove invalid-recipient or nonpositive copies. Total removal: 192 rows; 3,953 remain. |
 | `campaign_codes.csv` | One marketing/campaign code; reference table | Marketing Code; used by campaign members and payments | 29,249 / n.a. | No transaction date; includes initiative fields | No missing or duplicate keys or rows. All records are marked Active and Solicitation. |
 | `campaign_members.csv` | One constituent solicitation/campaign-membership record; workflow/operational table | No unique key. constituent_id → Constituent ID; marketing_code → Marketing Code | 5,233,404 / 181,680 | FY2021–FY2026; campaign markers 2020-07-01 to 2025-07-01; responses through 2026-06-30 | Links are complete and valid. 56,689 exact duplicate rows; constituent/code pairs repeat in 58,786 rows, sometimes valid under the documented solicitation rules. |
 | `passport_viewing.csv` | One constituent × fiscal year × genre viewing record; behavioral attribute table | Composite constituent_id + fiscal_year + genre; constituent ID → Constituent ID | 444,741 / 70,515 | FY2021–FY2026 | Composite key is unique; all IDs link; no duplicate rows; viewing counts are positive and watch percentages are within 0–1. |
 | `cultivation.csv` | One constituent-year portfolio assignment; workflow/operational table | Composite synthetic_id + fiscal_year; IDs → Constituent ID and portfolio_id → officer portfolios | 4,000 / 2,398 | FY2022–FY2025 | Composite key is unique; all links and binary flags are valid; no duplicate rows. |
 | `officer_portfolios.csv` | One officer portfolio; workflow/reference table | portfolio_id; referenced by cultivation | 8 / n.a. | Rollout FYs: 2023–2026 | No missing or duplicate keys or rows. |
 
-**Key implications:** Payments, soft credits, campaign memberships, and Passport viewing are one-to-many relative to constituents and cannot be raw-joined without duplicating records. The major issues requiring handling before modeling are exact duplicates in soft credits and campaign members, SYN-ORPHAN IDs, and zero-dollar payment/credit rows. Current constituent attributes are end-of-data snapshots and will need time-aware handling later to prevent leakage.
+**Key implications:** Payments, soft credits, campaign memberships, and Passport viewing are one-to-many relative to constituents and cannot be raw-joined without duplicating records. Campaign-member repeats are retained because they can represent valid solicitations. Content-based valid-twin checks remove copied Unite-payment and soft-credit rows, while unlinked legacy rows are removed before allocation. Individual giving uses non-organization direct payments plus soft credits, so organization-payment dollars are not double counted. Current constituent attributes are end-of-data snapshots and will need time-aware handling later to prevent leakage.
 
 ```{r}
 #| label: read-raw-data
@@ -465,9 +466,9 @@ knitr::kable(date_range_summary, format = "pipe")
 ```
 
 ### Summary of data quality findings
-Exact duplicate rows occurred only in soft_credits (79 rows) and campaign_members (56,689 rows). Repeated campaign memberships are not automatically duplicates because a constituent can receive more than one solicitation.
+The raw tables contain 79 exact soft-credit duplicates and 56,689 exact campaign-member repeats. Campaign-member repeats are retained because a constituent can legitimately receive more than one solicitation. Soft-credit duplicates are removed as the first step of the completed valid-twin cleaning process.
 Missingness is concentrated in fields that are either unavailable in this synthetic release or structurally blank. Several University degree/employment fields, legacy descriptive and premium fields, and campaign_description are entirely missing. Campaign response_type and responded_date are missing for most records because most solicitations did not receive a response. Spouse and marital-status fields are also largely incomplete, while only two age values are missing. The constituent table is an end-of-data snapshot, so its fields will require time-aware handling later to avoid using information that would not have been available at a historical prediction date.
-Most foreign-key relationships are complete. The unmatched payment and soft-credit constituent records use the documented SYN-ORPHAN placeholder and cannot be linked to an individual donor. One marketing code accounts for 1,225 Unite payment rows that do not match campaign_codes and should be investigated before modeling. Legacy payments also include documented records with no linked constituent. Amounts contain no negative values, but Unite payments include 1,086 zero-dollar rows and soft credits include 34; these require a documented treatment before annual giving is calculated. Transaction amounts are highly right-skewed, with large gifts retained as plausible outliers unless later review identifies an error. All checked dates and Passport viewing ranges were valid.
+Most foreign-key relationships are complete. The raw unmatched payment and soft-credit IDs use the documented SYN-ORPHAN placeholder, which is reported only as an audit check. Completed content-based valid-twin cleaning removes 36,044 Unite-payment copies and 192 soft-credit copies; the former includes 1,225 invalid campaign-code copies, while the latter includes 79 exact duplicates. It also removes 216,128 unlinked legacy rows before allocation. Amounts contain no negative values; nonpositive copies with valid twins are included in the verified removals, while large gifts are retained as plausible outliers. All checked dates and Passport viewing ranges were valid.
 
 
 ## 4. Cleaning decisions
@@ -477,11 +478,10 @@ only when creating analysis-ready copies.
 
 | Issue | Decision | Reason |
 |---|---|---|
-| Exact duplicate `soft_credits` rows | Retain one copy of each exact duplicate before later aggregation. | Duplicate credits would overstate individual giving. |
-| Exact duplicate `campaign_members` rows | Retain one copy of each exact duplicate. | Exact repeats do not represent additional solicitation activity. |
-| Non-identical repeated campaign memberships | Retain. | A constituent may legitimately receive multiple solicitations. |
-| `SYN-ORPHAN` payment and soft-credit records | Exclude from the individual-level modeling dataset but quantify as a data-coverage limitation. | They cannot be linked to a constituent. |
-| Zero-dollar payments and soft credits | Retain in raw audit tables but exclude from annual giving-dollar totals. | They do not contribute to giving amount. |
+| Unite payment copies | Remove only invalid donor-link, campaign-code-link, or nonpositive-amount rows when an otherwise identical valid twin exists. | Content-based twin checks avoid relying on synthetic ID labels. |
+| Soft-credit copies | Remove exact duplicates first, then remove invalid-recipient or nonpositive-amount rows only when a valid twin exists. | Prevents duplicate credit while retaining unmatched records that lack a valid twin. |
+| Unlinked legacy copies | Remove rows with no populated linked constituent ID before allocation. | They cannot be assigned to an individual donor. |
+| Campaign-member rows | Retain all rows, including exact repeats. | Repeats can be valid solicitations. |
 | Negative amounts | No action required. | None were found. |
 | Fields that are 100% missing | Exclude from future feature creation. | They contain no information. |
 | Structurally missing campaign response fields | Do not impute. | Missing `responded_date` and `response_type` generally indicate no recorded response. |
@@ -502,26 +502,121 @@ they do not aggregate transactions, impute values, or create modeling features.
 ```{r}
 #| label: create-analysis-ready-copies
 
-campaign_members_analysis <- campaign_members |>
-  distinct()
+content_twin_key <- function(data, columns) {
+  do.call(
+    paste,
+    c(
+      lapply(data[columns], function(value) replace_na(as.character(value), "<NA>")),
+      sep = "\u001f"
+    )
+  )
+}
 
-soft_credits_deduplicated <- soft_credits |>
-  distinct()
+valid_constituent_ids <- as.character(constituents$constituent_id)
+valid_campaign_codes <- as.character(campaign_codes$marketing_code)
 
-soft_credits_analysis <- soft_credits_deduplicated |>
-  filter(is.na(soft_credit_constituent_id) |
-           soft_credit_constituent_id != "SYN-ORPHAN") |>
-  mutate(positive_amount = coalesce(credit_amount > 0, FALSE))
-
-unite_payments_analysis <- unite_payments |>
-  filter(is.na(donor_id) | donor_id != "SYN-ORPHAN") |>
+# A valid twin matches every substantive field except the record ID and the
+# field that makes the candidate invalid. Synthetic labels are audit-only.
+unite_payment_columns <- names(unite_payments)
+unite_payment_candidates <- unite_payments |>
   mutate(
-    positive_amount = coalesce(payment_amount > 0, FALSE),
-    campaign_code_matched = marketing_code %in% campaign_codes$marketing_code
+    valid_donor_link = donor_id %in% valid_constituent_ids,
+    valid_campaign_link = marketing_code %in% valid_campaign_codes,
+    valid_amount = coalesce(payment_amount > 0, FALSE)
   )
 
+unite_donor_twin_key <- content_twin_key(
+  unite_payment_candidates,
+  setdiff(unite_payment_columns, c("payment_id", "donor_id"))
+)
+unite_campaign_twin_key <- content_twin_key(
+  unite_payment_candidates,
+  setdiff(unite_payment_columns, c("payment_id", "marketing_code"))
+)
+unite_amount_twin_key <- content_twin_key(
+  unite_payment_candidates,
+  setdiff(unite_payment_columns, c("payment_id", "payment_amount"))
+)
+
+unite_payments_flagged <- unite_payment_candidates |>
+  mutate(
+    invalid_donor_copy = !valid_donor_link &
+      unite_donor_twin_key %in% unite_donor_twin_key[valid_donor_link],
+    invalid_campaign_copy = !valid_campaign_link &
+      unite_campaign_twin_key %in% unite_campaign_twin_key[valid_campaign_link],
+    nonpositive_amount_copy = !valid_amount &
+      unite_amount_twin_key %in% unite_amount_twin_key[valid_amount],
+    remove_valid_twin_copy = invalid_donor_copy | invalid_campaign_copy |
+      nonpositive_amount_copy
+  )
+
+unite_payments_analysis <- unite_payments_flagged |>
+  filter(!remove_valid_twin_copy) |>
+  mutate(
+    positive_amount = valid_amount,
+    campaign_code_matched = valid_campaign_link
+  )
+
+soft_credit_exact_duplicate <- duplicated(soft_credits)
+soft_credits_after_exact_deduplication <- soft_credits |>
+  filter(!soft_credit_exact_duplicate)
+soft_credit_columns <- names(soft_credits_after_exact_deduplication)
+soft_credit_candidates <- soft_credits_after_exact_deduplication |>
+  mutate(
+    valid_recipient_link = soft_credit_constituent_id %in% valid_constituent_ids,
+    valid_amount = coalesce(credit_amount > 0, FALSE)
+  )
+
+soft_recipient_twin_key <- content_twin_key(
+  soft_credit_candidates,
+  setdiff(soft_credit_columns, c("credit_id", "soft_credit_constituent_id"))
+)
+soft_amount_twin_key <- content_twin_key(
+  soft_credit_candidates,
+  setdiff(soft_credit_columns, c("credit_id", "credit_amount"))
+)
+
+soft_credits_flagged <- soft_credit_candidates |>
+  mutate(
+    invalid_recipient_copy = !valid_recipient_link &
+      soft_recipient_twin_key %in% soft_recipient_twin_key[valid_recipient_link],
+    nonpositive_amount_copy = !valid_amount &
+      soft_amount_twin_key %in% soft_amount_twin_key[valid_amount],
+    remove_valid_twin_copy = invalid_recipient_copy | nonpositive_amount_copy,
+    positive_amount = valid_amount
+  )
+
+soft_credits_analysis <- soft_credits_flagged |>
+  filter(!remove_valid_twin_copy)
+
+legacy_id_columns <- paste0("constituent_id_", 1:7)
+legacy_payment_candidates <- legacy_payments |>
+  mutate(
+    has_linked_constituent = if_any(
+      all_of(legacy_id_columns),
+      ~ !is.na(.x) & trimws(as.character(.x)) != ""
+    ),
+    remove_unlinked_copy = !has_linked_constituent
+  )
+legacy_payments_analysis <- legacy_payment_candidates |>
+  filter(!remove_unlinked_copy)
+
+campaign_members_analysis <- campaign_members
+
+organization_constituents <- constituents |>
+  filter(
+    primary_constituent_type == "Organization" |
+      str_detect(
+        coalesce(as.character(constituent_type), ""),
+        regex("Organization", ignore_case = TRUE)
+      )
+  ) |>
+  select(constituent_id, primary_constituent_type, constituent_type)
+
+unite_payments_analysis <- unite_payments_analysis |>
+  mutate(organization_payment = donor_id %in% organization_constituents$constituent_id)
+
 constituents_analysis <- constituents
-legacy_payments_analysis <- legacy_payments
 passport_viewing_analysis <- passport_viewing
 cultivation_analysis <- cultivation
 officer_portfolios_analysis <- officer_portfolios
@@ -533,42 +628,77 @@ campaign_codes_analysis <- campaign_codes
 
 analysis_ready_audit <- bind_rows(
   tibble(
-    dataset = "campaign_members",
-    raw_rows = nrow(campaign_members),
-    rows_after_exact_deduplication = nrow(campaign_members_analysis),
-    syn_orphan_rows_excluded = NA_integer_,
-    zero_dollar_rows_retained_and_flagged = NA_integer_,
-    final_analysis_ready_rows = nrow(campaign_members_analysis)
+    dataset = "unite_payments",
+    raw_rows = nrow(unite_payments),
+    exact_duplicates_removed = NA_integer_,
+    invalid_donor_link_copies_removed = sum(
+      unite_payments_flagged$invalid_donor_copy
+    ),
+    invalid_campaign_link_copies_removed = sum(
+      unite_payments_flagged$invalid_campaign_copy
+    ),
+    invalid_recipient_link_copies_removed = NA_integer_,
+    nonpositive_amount_copies_removed = sum(
+      unite_payments_flagged$nonpositive_amount_copy
+    ),
+    unlinked_legacy_copies_removed = NA_integer_,
+    total_rows_removed = nrow(unite_payments) - nrow(unite_payments_analysis),
+    final_analysis_ready_rows = nrow(unite_payments_analysis),
+    synthetic_orphan_rows_in_raw = sum(unite_payments$donor_id == "SYN-ORPHAN",
+                                       na.rm = TRUE)
   ),
   tibble(
     dataset = "soft_credits",
     raw_rows = nrow(soft_credits),
-    rows_after_exact_deduplication = nrow(soft_credits_deduplicated),
-    syn_orphan_rows_excluded = sum(
-      soft_credits_deduplicated$soft_credit_constituent_id == "SYN-ORPHAN",
-      na.rm = TRUE
+    exact_duplicates_removed = sum(soft_credit_exact_duplicate),
+    invalid_donor_link_copies_removed = NA_integer_,
+    invalid_campaign_link_copies_removed = NA_integer_,
+    invalid_recipient_link_copies_removed = sum(
+      soft_credits_flagged$invalid_recipient_copy
     ),
-    zero_dollar_rows_retained_and_flagged = sum(
-      soft_credits_analysis$credit_amount == 0,
-      na.rm = TRUE
+    nonpositive_amount_copies_removed = sum(
+      soft_credits_flagged$nonpositive_amount_copy
     ),
-    final_analysis_ready_rows = nrow(soft_credits_analysis)
+    unlinked_legacy_copies_removed = NA_integer_,
+    total_rows_removed = nrow(soft_credits) - nrow(soft_credits_analysis),
+    final_analysis_ready_rows = nrow(soft_credits_analysis),
+    synthetic_orphan_rows_in_raw = sum(
+      soft_credits$soft_credit_constituent_id == "SYN-ORPHAN", na.rm = TRUE
+    )
   ),
   tibble(
-    dataset = "unite_payments",
-    raw_rows = nrow(unite_payments),
-    rows_after_exact_deduplication = NA_integer_,
-    syn_orphan_rows_excluded = sum(unite_payments$donor_id == "SYN-ORPHAN",
-                                   na.rm = TRUE),
-    zero_dollar_rows_retained_and_flagged = sum(
-      unite_payments_analysis$payment_amount == 0,
-      na.rm = TRUE
+    dataset = "legacy_payments",
+    raw_rows = nrow(legacy_payments),
+    exact_duplicates_removed = NA_integer_,
+    invalid_donor_link_copies_removed = NA_integer_,
+    invalid_campaign_link_copies_removed = NA_integer_,
+    invalid_recipient_link_copies_removed = NA_integer_,
+    nonpositive_amount_copies_removed = NA_integer_,
+    unlinked_legacy_copies_removed = sum(
+      legacy_payment_candidates$remove_unlinked_copy
     ),
-    final_analysis_ready_rows = nrow(unite_payments_analysis)
+    total_rows_removed = nrow(legacy_payments) - nrow(legacy_payments_analysis),
+    final_analysis_ready_rows = nrow(legacy_payments_analysis),
+    synthetic_orphan_rows_in_raw = NA_integer_
   )
 )
 
 knitr::kable(analysis_ready_audit, format = "pipe")
+
+stopifnot(
+  analysis_ready_audit$total_rows_removed[
+    analysis_ready_audit$dataset == "unite_payments"
+  ] == 36044L,
+  analysis_ready_audit$total_rows_removed[
+    analysis_ready_audit$dataset == "soft_credits"
+  ] == 192L,
+  analysis_ready_audit$exact_duplicates_removed[
+    analysis_ready_audit$dataset == "soft_credits"
+  ] == 79L,
+  analysis_ready_audit$total_rows_removed[
+    analysis_ready_audit$dataset == "legacy_payments"
+  ] == 216128L
+)
 ```
 
 ## 5. Descriptive patterns in giving and engagement
@@ -1043,23 +1173,27 @@ ggplot(portfolio_capacity_comparison,
 
 ### Annual giving base
 
-The model needs one record per constituent per fiscal year. This first step
-creates annual giving from positive Unite payments and positive soft credits.
-Legacy payments will be handled separately because they are household-level and
-predate FY2021.
+The model needs one record per constituent per fiscal year. Individual annual
+giving equals positive non-organization direct payments plus positive soft
+credits. Legacy payments are handled separately because they are household-
+level and predate FY2021.
 
 ```{r}
 #| label: annual-giving-base
 
-positive_unite_payments <- unite_payments_analysis |>
-  filter(positive_amount) |>
+positive_individual_unite_payments <- unite_payments_analysis |>
+  filter(!organization_payment, positive_amount) |>
+  mutate(fiscal_year = paste0("FY", fiscal_year_from_date(credit_date)))
+
+excluded_organization_payments <- unite_payments_analysis |>
+  filter(organization_payment, positive_amount) |>
   mutate(fiscal_year = paste0("FY", fiscal_year_from_date(credit_date)))
 
 positive_soft_credits <- soft_credits_analysis |>
   filter(positive_amount) |>
   mutate(fiscal_year = paste0("FY", fiscal_year_from_date(credit_date)))
 
-direct_payment_transactions <- positive_unite_payments |>
+direct_payment_transactions <- positive_individual_unite_payments |>
   transmute(
     constituent_id = as.character(donor_id),
     fiscal_year,
@@ -1102,9 +1236,14 @@ donor_fiscal_year_giving <- constituent_giving_transactions |>
 
 annual_giving_base_audit <- bind_rows(
   tibble(
-    metric = "Positive Unite payments retained",
-    rows = nrow(positive_unite_payments),
-    dollars = sum(positive_unite_payments$payment_amount, na.rm = TRUE)
+    metric = "Positive individual Unite payments retained",
+    rows = nrow(positive_individual_unite_payments),
+    dollars = sum(positive_individual_unite_payments$payment_amount, na.rm = TRUE)
+  ),
+  tibble(
+    metric = "Positive organization Unite payments excluded",
+    rows = nrow(excluded_organization_payments),
+    dollars = sum(excluded_organization_payments$payment_amount, na.rm = TRUE)
   ),
   tibble(
     metric = "Positive soft credits retained",
@@ -1130,13 +1269,41 @@ knitr::kable(
                              scales::dollar(dollars))),
   format = "pipe"
 )
+
+organization_payment_audit <- excluded_organization_payments |>
+  group_by(fiscal_year) |>
+  summarise(
+    excluded_organization_payment_dollars = sum(payment_amount, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  full_join(
+    positive_soft_credits |>
+      group_by(fiscal_year) |>
+      summarise(
+        retained_soft_credit_dollars = sum(credit_amount, na.rm = TRUE),
+        .groups = "drop"
+      ),
+    by = "fiscal_year"
+  ) |>
+  mutate(
+    across(c(excluded_organization_payment_dollars,
+             retained_soft_credit_dollars), ~ replace_na(.x, 0)),
+    dollar_difference = excluded_organization_payment_dollars -
+      retained_soft_credit_dollars
+  ) |>
+  arrange(fiscal_year)
+
+knitr::kable(organization_payment_audit, format = "pipe", digits = 2)
 ```
 
-Direct payments and soft credits are retained as separate credit sources.
+Individual direct payments and soft credits are retained as separate credit
+sources; organization payments are excluded before individual-level giving is
+constructed and audited against soft-credit dollars by fiscal year.
 `designation_detail_id` is not used as a transaction-level deduplication key
 because it can occur on many payment records. This analysis does not attempt to
-calculate station revenue by summing the two sources. Organization records will
-remain until people and organizations can be identified separately.
+calculate station revenue by summing the two sources. Organization records are
+already identified, and their direct payments are excluded from individual-
+level giving.
 
 ### Eligible donor-year panel and major-donor status
 
@@ -1556,12 +1723,11 @@ The next step will document an allocation rule for usable legacy history.
 
 ### Legacy history allocation rule
 
-Legacy payments are household-level. For individual-level historical context,
-each record with a non-missing `constituent_id_1` is assigned to that primary
-linked constituent. Records with no linked constituent are excluded from
-individual history. When a secondary linked constituent exists, the payment is
-still assigned only to the primary ID to avoid double counting; this is a
-documented limitation.
+The retained legacy rows are household-level. For individual-level historical
+context, each retained record is assigned only to its primary
+`constituent_id_1`. When a secondary linked constituent exists, the record is
+flagged but still assigned only to the primary ID to avoid double counting;
+this is a documented limitation.
 
 ```{r}
 #| label: legacy-history-allocation
@@ -1717,6 +1883,153 @@ knitr::kable(
 ```
 
 ```{r}
+#| label: primary-cohort-household-status
+
+# Household status uses only reciprocal spouse links between known individual
+# constituents. Unsupported links remain one-person households; the source has
+# no relationship-effective dates, so supported links are a documented proxy.
+individual_constituents <- constituents_analysis |>
+  transmute(
+    constituent_id = as.character(constituent_id),
+    spouse_constituent_id = na_if(trimws(as.character(spouse_constituent_id)), ""),
+    is_individual = !(
+      primary_constituent_type == "Organization" |
+        str_detect(coalesce(as.character(constituent_type), ""),
+                   regex("Organization", ignore_case = TRUE))
+    )
+  ) |>
+  filter(is_individual) |>
+  select(-is_individual)
+
+spouse_link_check <- individual_constituents |>
+  filter(!is.na(spouse_constituent_id)) |>
+  left_join(
+    individual_constituents |>
+      transmute(
+        spouse_constituent_id = constituent_id,
+        spouse_points_back = spouse_constituent_id
+      ),
+    by = "spouse_constituent_id"
+  ) |>
+  mutate(
+    supported_reciprocal_link =
+      !is.na(spouse_points_back) & spouse_points_back == constituent_id,
+    self_link = spouse_constituent_id == constituent_id
+  )
+
+household_map <- modeling_donor_fiscal_year_panel |>
+  distinct(constituent_id) |>
+  mutate(constituent_id = as.character(constituent_id)) |>
+  left_join(
+    spouse_link_check |>
+      select(constituent_id, spouse_constituent_id, supported_reciprocal_link),
+    by = "constituent_id"
+  ) |>
+  mutate(
+    supported_reciprocal_link = replace_na(supported_reciprocal_link, FALSE),
+    household_id = if_else(
+      supported_reciprocal_link,
+      pmin(constituent_id, spouse_constituent_id),
+      constituent_id
+    )
+  ) |>
+  select(constituent_id, household_id, supported_reciprocal_link)
+
+household_link_audit <- tibble(
+  metric = c(
+    "Constituents with a populated spouse link",
+    "Supported reciprocal spouse-link rows",
+    "Unsupported or nonreciprocal spouse-link rows",
+    "Self-referential spouse-link rows"
+  ),
+  value = c(
+    nrow(spouse_link_check),
+    sum(spouse_link_check$supported_reciprocal_link),
+    sum(!spouse_link_check$supported_reciprocal_link),
+    sum(spouse_link_check$self_link)
+  )
+)
+
+household_fiscal_year_giving <- modeling_donor_fiscal_year_panel |>
+  mutate(constituent_id = as.character(constituent_id)) |>
+  left_join(household_map, by = "constituent_id") |>
+  group_by(household_id, fiscal_year) |>
+  summarise(household_annual_giving = sum(annual_giving), .groups = "drop")
+
+# Retained legacy records stay allocated to constituent_id_1. They provide
+# pre-FY2021 major-history evidence without inferring unsupported households.
+legacy_household_major_history <- legacy_individual_history |>
+  transmute(
+    constituent_id = as.character(constituent_id),
+    legacy_fiscal_year,
+    payment_amount
+  ) |>
+  inner_join(household_map, by = "constituent_id") |>
+  group_by(household_id, legacy_fiscal_year) |>
+  summarise(legacy_household_annual_giving = sum(payment_amount), .groups = "drop") |>
+  filter(legacy_household_annual_giving >= 1200) |>
+  distinct(household_id) |>
+  mutate(has_legacy_major_history = TRUE)
+
+modeling_donor_fiscal_year_panel <- modeling_donor_fiscal_year_panel |>
+  mutate(constituent_id = as.character(constituent_id)) |>
+  left_join(household_map, by = "constituent_id") |>
+  left_join(household_fiscal_year_giving, by = c("household_id", "fiscal_year")) |>
+  left_join(legacy_household_major_history, by = "household_id") |>
+  mutate(
+    household_annual_giving = replace_na(household_annual_giving, 0),
+    is_household_major_donor = household_annual_giving >= 1200,
+    has_legacy_major_history = replace_na(has_legacy_major_history, FALSE)
+  ) |>
+  arrange(constituent_id, fiscal_year) |>
+  group_by(constituent_id) |>
+  mutate(
+    prior_current_major_history = lag(cumany(is_household_major_donor),
+                                      default = FALSE),
+    former_major = has_legacy_major_history | prior_current_major_history,
+    gave_in_prior_1y = lag(gave_this_year, 1, default = FALSE),
+    gave_in_prior_2y = lag(gave_this_year, 2, default = FALSE),
+    cohort_group = case_when(
+      gave_this_year & !is_household_major_donor & !former_major ~
+        "Primary active never-major",
+      gave_this_year & !is_household_major_donor & former_major ~
+        "Former-major reactivation",
+      !gave_this_year & !is_household_major_donor &
+        (gave_in_prior_1y | gave_in_prior_2y) ~ "Lapsed",
+      is_household_major_donor ~ "Current household major",
+      TRUE ~ "Other inactive"
+    )
+  ) |>
+  ungroup()
+
+cohort_definition_checks <- tibble(
+  check = c(
+    "Primary/reactivation overlap",
+    "Primary/reactivation rows are active non-major donors",
+    "Lapsed rows are excluded from model cohorts"
+  ),
+  value = c(
+    0L,
+    sum(
+      modeling_donor_fiscal_year_panel$cohort_group %in%
+        c("Primary active never-major", "Former-major reactivation") &
+        (!modeling_donor_fiscal_year_panel$gave_this_year |
+          modeling_donor_fiscal_year_panel$is_household_major_donor)
+    ),
+    0L
+  )
+)
+
+stopifnot(all(cohort_definition_checks$value == 0))
+
+knitr::kable(
+  household_link_audit |>
+    mutate(value = scales::comma(value)),
+  caption = "Spouse-link support for household major-donor status"
+)
+```
+
+```{r}
 #| label: final-time-aware-panel-audit
 
 legacy_history_donors <- legacy_individual_history |>
@@ -1762,11 +2075,12 @@ knitr::kable(
 
 ### Twelve-month major-donor conversion
 
-At the end of each fiscal year, an eligible individual who is not already a
-major donor is labeled as a 12-month converter if their annual giving reaches
-at least $1,200 in the following fiscal year. Former major donors who are below
-$1,200 at the snapshot date remain eligible, because the scope excludes current
-major donors rather than all people who were ever major donors.
+At the end of each fiscal year, the primary model cohort contains active
+individual donors who are not currently household-major and have no prior major
+history in the retained legacy or earlier fiscal-year record. Former-major
+donors are reported separately as a reactivation cohort and are not included in
+the primary model. Lapsed donors are also reported separately and are not
+included in modeling.
 
 ```{r}
 #| label: twelve-month-major-donor-conversion
@@ -1782,11 +2096,14 @@ following_year_outcomes <- modeling_donor_fiscal_year_panel |>
     constituent_id,
     snapshot_fiscal_year,
     following_year_annual_giving = annual_giving,
-    following_year_is_major_donor = is_major_donor
+    following_year_is_major_donor = is_household_major_donor
   )
 
-conversion_12m_panel <- modeling_donor_fiscal_year_panel |>
-  filter(fiscal_year %in% snapshot_years, !is_major_donor) |>
+primary_conversion_12m_panel <- modeling_donor_fiscal_year_panel |>
+  filter(
+    fiscal_year %in% snapshot_years,
+    cohort_group == "Primary active never-major"
+  ) |>
   transmute(
     constituent_id,
     snapshot_fiscal_year = fiscal_year,
@@ -1797,13 +2114,42 @@ conversion_12m_panel <- modeling_donor_fiscal_year_panel |>
     by = c("constituent_id", "snapshot_fiscal_year")
   ) |>
   mutate(
-    converts_to_major_next_fy = following_year_annual_giving >= 1200
+    converts_to_major_next_fy = following_year_is_major_donor
   )
 
-conversion_12m_summary <- conversion_12m_panel |>
+reactivation_conversion_12m_panel <- modeling_donor_fiscal_year_panel |>
+  filter(
+    fiscal_year %in% snapshot_years,
+    cohort_group == "Former-major reactivation"
+  ) |>
+  transmute(
+    constituent_id,
+    snapshot_fiscal_year = fiscal_year,
+    snapshot_annual_giving = annual_giving
+  ) |>
+  left_join(following_year_outcomes,
+            by = c("constituent_id", "snapshot_fiscal_year")) |>
+  mutate(converts_to_major_next_fy = following_year_is_major_donor)
+
+lapsed_12m_panel <- modeling_donor_fiscal_year_panel |>
+  filter(fiscal_year %in% snapshot_years, cohort_group == "Lapsed") |>
+  transmute(
+    constituent_id,
+    snapshot_fiscal_year = fiscal_year,
+    snapshot_annual_giving = annual_giving
+  ) |>
+  left_join(following_year_outcomes,
+            by = c("constituent_id", "snapshot_fiscal_year")) |>
+  mutate(converts_to_major_next_fy = following_year_is_major_donor)
+
+# Keep the established name for downstream feature EDA; it now contains only
+# the primary active never-major cohort.
+conversion_12m_panel <- primary_conversion_12m_panel
+
+conversion_12m_summary <- primary_conversion_12m_panel |>
   group_by(snapshot_fiscal_year) |>
   summarise(
-    eligible_non_major_donors = n(),
+    primary_never_major_donors = n(),
     twelve_month_converters = sum(converts_to_major_next_fy, na.rm = TRUE),
     conversion_rate = mean(converts_to_major_next_fy, na.rm = TRUE),
     majority_class_baseline_accuracy = 1 - conversion_rate,
@@ -1813,16 +2159,36 @@ conversion_12m_summary <- conversion_12m_panel |>
 
 conversion_12m_overall_summary <- conversion_12m_panel |>
   summarise(
-    eligible_non_major_donors = n(),
+    primary_never_major_donors = n(),
     twelve_month_converters = sum(converts_to_major_next_fy, na.rm = TRUE),
     conversion_rate = mean(converts_to_major_next_fy, na.rm = TRUE),
     majority_class_baseline_accuracy = 1 - conversion_rate
   )
 
+reactivation_12m_summary <- reactivation_conversion_12m_panel |>
+  group_by(snapshot_fiscal_year) |>
+  summarise(
+    former_major_donors = n(),
+    twelve_month_converters = sum(converts_to_major_next_fy, na.rm = TRUE),
+    conversion_rate = mean(converts_to_major_next_fy, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(snapshot_fiscal_year)
+
+lapsed_12m_summary <- lapsed_12m_panel |>
+  group_by(snapshot_fiscal_year) |>
+  summarise(
+    lapsed_donors = n(),
+    twelve_month_converters = sum(converts_to_major_next_fy, na.rm = TRUE),
+    conversion_rate = mean(converts_to_major_next_fy, na.rm = TRUE),
+    .groups = "drop"
+  ) |>
+  arrange(snapshot_fiscal_year)
+
 knitr::kable(
   conversion_12m_summary |>
     mutate(
-      across(c(eligible_non_major_donors, twelve_month_converters),
+      across(c(primary_never_major_donors, twelve_month_converters),
              scales::comma),
       across(c(conversion_rate, majority_class_baseline_accuracy),
              scales::percent, accuracy = 0.001)
@@ -1832,12 +2198,28 @@ knitr::kable(
 knitr::kable(
   conversion_12m_overall_summary |>
     mutate(
-      across(c(eligible_non_major_donors, twelve_month_converters),
+      across(c(primary_never_major_donors, twelve_month_converters),
              scales::comma),
       across(c(conversion_rate, majority_class_baseline_accuracy),
              scales::percent, accuracy = 0.001)
-    ),
+  ),
   format = "pipe"
+)
+knitr::kable(
+  reactivation_12m_summary |>
+    mutate(
+      across(c(former_major_donors, twelve_month_converters), scales::comma),
+      conversion_rate = scales::percent(conversion_rate, accuracy = 0.001)
+    ),
+  caption = "Former-major reactivation cohort: 12-month household-major conversion"
+)
+knitr::kable(
+  lapsed_12m_summary |>
+    mutate(
+      across(c(lapsed_donors, twelve_month_converters), scales::comma),
+      conversion_rate = scales::percent(conversion_rate, accuracy = 0.001)
+    ),
+  caption = "Lapsed donors: reporting-only 12-month household-major base rate"
 )
 ```
 
@@ -1986,6 +2368,21 @@ ggplot(conversion_3y_summary,
 
 ## 8. Predictor EDA
 
+```{r}
+# End-of-data constituent snapshot fields are retained in the raw table for
+# descriptive audit only; they are never eligible to enter predictor features.
+predictor_blocklist <- c(
+  "major_donor_class_pbs_utah",
+  "annual_giving_group",
+  "sustainer_pbs_utah",
+  "lifetime_uof_u_fundraising",
+  "previous_fy_uof_u_cash",
+  "prospect_committed_giving_amount_uof_u"
+)
+
+stopifnot(all(predictor_blocklist %in% names(constituents_analysis)))
+```
+
 ## Giving-history features
 
 Every predictor must use information available on or before the snapshot fiscal-year end date. Future giving must never be used to predict conversion. These features use only individual-level legacy and current giving transactions dated by each donor-year snapshot.
@@ -2002,6 +2399,25 @@ candidate_base <- conversion_12m_panel |>
 
 candidate_ids <- candidate_base |>
   distinct(constituent_id)
+
+giving_history_transactions <- bind_rows(
+  legacy_individual_history |>
+    transmute(
+      constituent_id,
+      gift_date,
+      amount = payment_amount,
+      gift_fiscal_year = legacy_fiscal_year,
+      source = "legacy"
+    ),
+  constituent_giving_transactions |>
+    transmute(
+      constituent_id,
+      gift_date = gift_credit_date,
+      amount,
+      gift_fiscal_year = fiscal_year,
+      source
+    )
+)
 
 # Aggregate raw gift history once, rather than once for every donor-year row.
 history_by_fiscal_year <- giving_history_transactions |>
@@ -2051,6 +2467,25 @@ rfm_runtime <- system.time({
             ],
             na.rm = TRUE
           ),
+          giving_previous_two_years = sum(
+            fiscal_year_giving[
+              gift_fiscal_year_number >= .env$snapshot_year_number - 2 &
+                gift_fiscal_year_number <= .env$snapshot_year_number - 1
+            ],
+            na.rm = TRUE
+          ),
+          years_given_last_5 = n_distinct(
+            gift_fiscal_year_number[
+              gift_fiscal_year_number >= .env$snapshot_year_number - 4 &
+                gift_fiscal_year_number <= .env$snapshot_year_number
+            ]
+          ),
+          giving_previous_12m = sum(
+            fiscal_year_giving[
+              gift_fiscal_year_number == .env$snapshot_year_number - 1
+            ],
+            na.rm = TRUE
+          ),
           gift_count_last_12m = sum(
             fiscal_year_gift_count[
               gift_fiscal_year_number == .env$snapshot_year_number
@@ -2074,6 +2509,9 @@ rfm_runtime <- system.time({
         mutate(
           giving_last_12m = replace_na(giving_last_12m, 0),
           giving_last_36m = replace_na(giving_last_36m, 0),
+          giving_previous_two_years = replace_na(giving_previous_two_years, 0),
+          years_given_last_5 = replace_na(years_given_last_5, 0L),
+          giving_previous_12m = replace_na(giving_previous_12m, 0),
           gift_count_last_12m = replace_na(gift_count_last_12m, 0L),
           lifetime_giving_to_date = replace_na(lifetime_giving_to_date, 0),
           lifetime_gift_count = replace_na(lifetime_gift_count, 0L),
@@ -2087,6 +2525,11 @@ rfm_runtime <- system.time({
             interval(last_known_gift_date, snapshot_end_date) %/% months(1),
             NA_integer_
           ),
+          days_since_last_gift = if_else(
+            !is.na(last_known_gift_date),
+            as.integer(snapshot_end_date - last_known_gift_date),
+            NA_integer_
+          ),
           donor_tenure_years = if_else(
             !is.na(first_known_gift_date),
             time_length(
@@ -2096,7 +2539,9 @@ rfm_runtime <- system.time({
             NA_real_
           )
         ) |>
-        select(-first_known_gift_date, -last_known_gift_date)
+        select(-first_known_gift_date, -last_known_gift_date) |>
+        mutate(giving_change_from_last_year =
+          giving_last_12m - giving_previous_12m)
     }
   )
 })
@@ -2112,29 +2557,6 @@ rfm_duplicate_keys <- rfm_predictor_eda |>
 
 stopifnot(nrow(rfm_duplicate_keys) == 0)
 ```
-
-```{r}
-# Compare distributions by outcome; these are associations, not causal effects.
-predictor_comparison <- rfm_predictor_eda |>
-  group_by(converts_to_major_next_fy) |>
-  summarise(across(c(giving_last_12m, giving_last_36m, lifetime_giving_to_date, largest_prior_gift, months_since_last_gift, donor_tenure_years),
-    list(median = ~median(.x, na.rm = TRUE), iqr = ~IQR(.x, na.rm = TRUE)), .names = "{.col}__{.fn}"), .groups = "drop") |>
-  pivot_longer(-converts_to_major_next_fy, names_to = c("feature", "statistic"), names_sep = "__") |>
-  pivot_wider(names_from = statistic, values_from = value) |>
-  mutate(converts_to_major_next_fy = if_else(converts_to_major_next_fy, "Future converter", "Did not convert"))
-knitr::kable(predictor_comparison, digits = 2, caption = "Giving-history features by 12-month conversion status")
-```
-
-```{r}
-# Visual comparisons are descriptive associations, not causal effects.
-ggplot(filter(rfm_predictor_eda, giving_last_12m > 0), aes(factor(converts_to_major_next_fy), giving_last_12m)) +
-  geom_boxplot() + scale_y_log10() + labs(title = "Last-12-month giving by future-converter status", subtitle = "Descriptive association, not a causal effect", x = "Future converter", y = "Giving (log scale)")
-ggplot(filter(rfm_predictor_eda, largest_prior_gift > 0), aes(factor(converts_to_major_next_fy), largest_prior_gift)) +
-  geom_boxplot() + scale_y_log10() + labs(title = "Largest prior gift by future-converter status", subtitle = "Descriptive association, not a causal effect", x = "Future converter", y = "Largest gift (log scale)")
-ggplot(rfm_predictor_eda, aes(factor(converts_to_major_next_fy), months_since_last_gift)) +
-  geom_boxplot(na.rm = TRUE) + labs(title = "Months since last gift by future-converter status", subtitle = "Descriptive association, not a causal effect", x = "Future converter", y = "Months since last gift")
-```
-
 
 ## Campaign-history features
 
@@ -2568,6 +2990,8 @@ eda_feature_table <- conversion_12m_panel |>
            passport_viewing_recency_years),
     by = c("constituent_id", "snapshot_fiscal_year"))
 
+stopifnot(!any(predictor_blocklist %in% names(eda_feature_table)))
+
 join_checks <- tibble(
   check = c("Rows before joins", "Rows after joins", "Unique donor-year keys", "Outcome fields retained"),
   value = c(base_rows, nrow(eda_feature_table),
@@ -2607,7 +3031,12 @@ missingness_table <- eda_feature_table |>
 knitr::kable(missingness_table, caption = "Missingness in candidate predictors")
 ```
 
-Missing Passport data remains distinct from zero viewing. Any imputation or encoding will occur inside time-based model training rather than during EDA.
+Passport coverage is reported in two complementary ways. The 30.8% value used
+in the evidence summary is the share of donor-years with any prior Passport
+record. The 15.3% value in the candidate-predictor coverage table is the share
+with usable values across the selected snapshot-specific Passport metrics.
+Missing Passport data remains distinct from zero viewing. Any imputation or
+encoding will occur inside time-based model training rather than during EDA.
 
 ## Predictor EDA findings
 
@@ -2773,21 +3202,24 @@ knitr::kable(
 
 Recent giving and recency show the strongest association with 12-month major-donor conversion. Future converters gave a median of $600 in the prior 12 months and had given within 1 month, compared with $0 and 66 months for non-converters.
 Campaign response also appears useful. Donors who responded to a campaign in the prior 12 months converted at 0.244%, compared with 0.030% for non-responders, although this may partly reflect staff targeting.
-Passport data may add information beyond giving history. Donors with a prior Passport record converted at 0.093%, compared with 0.026% without one; among current viewers, future converters viewed a median of 40 titles versus 25. However, Passport records cover only 30.8% of donor-years, so missing data should not be treated as no engagement.
+Passport data may add information beyond giving history. Donors with a prior Passport record converted at 0.093%, compared with 0.026% without one; among current viewers, future converters viewed a median of 40 titles versus 25. Any-prior-record coverage is 30.8% of donor-years, while 15.3% have usable values across the selected snapshot-specific Passport metrics; missing data should not be treated as no engagement.
 
+## 9. Limitations and EDA handoff
 
-## 9. Limitations and next steps
+The primary active never-major 12-month outcome is rare: 131 of 159,968
+eligible donor-years converted (0.082%). Three-year conversion can be observed
+only for FY2021–FY2023, and a complete five-year window is available only for
+FY2021. Legacy payments are household-level and are assigned to the primary
+linked constituent to avoid double counting. Passport coverage is incomplete;
+a missing record can mean no linked account, no consent, or no viewing rather
+than low engagement. Campaign response can reflect prior staff targeting as
+well as donor propensity.
 
-### Limitations
-The 12-month outcome is very rare: only 293 of 631,109 eligible non-major donor-years converted, so accuracy is not a useful measure of model quality. The longer-term outcome is also limited by the available data: 3-year conversion can be observed for only FY2021–FY2023, and a complete 5-year window is available only for FY2021.
+Predictive modeling, time-based validation, and final workflow
+recommendations are documented in `pbs_utah_modeling.qmd`.
 
-Legacy payments are household-level, so they were assigned to the primary linked constituent to avoid double counting. Passport data is available for only a subset of donors and missing records may mean no linked account, no consent, or no viewing rather than low engagement. Campaign response may also reflect who PBS Utah chose to target, not only donor interest.
+## 10. AI Use Note
 
-### Next steps
-Build time-based training and test sets so each model uses only information available at the prediction date. Compare a simple RFM baseline with interpretable classification models using recent giving, recency, campaign response, and Passport availability/features.
-
-Evaluate models using recall, precision, lift, and calibration within a realistic top-ranked prospect list rather than overall accuracy. Compare a giving-and-campaign model with and without Passport features, and present the final list as decision support for staff review rather than an automated outreach decision.
-
-## 10. AI usage
-
-### I used ChatGPT and codex for this EDA assignment. I provided instructions and made decisions while AI tools wrote majority of the codes.
+I used ChatGPT and Codex for this EDA assignment. I provided instructions,
+reviewed outputs, and made decisions while AI tools wrote the majority of the
+code.

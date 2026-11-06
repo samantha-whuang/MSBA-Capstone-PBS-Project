@@ -1,0 +1,22 @@
+# Confidential raw donor data: this does not affect files already tracked by Git.
+tables/*.csv
+
+# Donor-level ranking and contact-list exports.
+*prospect*.csv
+*ranking*.csv
+*ranked*.csv
+*contact*.csv
+*contact-list*.csv
+
+# Local R and macOS artifacts.
+.Rhistory
+.RData
+.Ruserdata
+.DS_Store
+
+# Rendered submission and Quarto support artifacts remain local by default.
+eda_pbs_utah.html
+eda_pbs_utah_files/
+*.rmarkdown
+*_submission.html
+*_files/

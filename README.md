@@ -2,15 +2,22 @@
 
 ## Project objective
 
-This project explores donor, giving, engagement, campaign, and cultivation data
-to prepare a time-aware donor--fiscal-year dataset for major-donor prospecting.
-The EDA documents data structure, quality checks, cleaning decisions, giving and
-engagement patterns, conversion targets, and candidate predictors before model
-testing.
+This project documents a time-aware donor--fiscal-year analysis for major-donor
+prospecting. It separates exploratory analysis and data preparation from the
+individual modeling submission.
+
+## Notebooks
+
+- [`eda_pbs_utah.qmd`](eda_pbs_utah.qmd) — data loading, content-based
+  cleaning, data-quality checks, descriptive EDA, cohort/target definitions,
+  and feature exploration.
+- [`pbs_utah_modeling.qmd`](pbs_utah_modeling.qmd) — the individual modeling
+  notebook for submission, including time-based evaluation and the three
+  modeling workstreams.
 
 ## Datasets used
 
-All source files are in [`Data/`](Data/):
+All source files are in [`tables/`](tables/):
 
 - `constituents_w_memberships.csv` — constituent attributes and membership data
 - `unite_payments.csv` — payments from FY2021 through FY2026
@@ -23,41 +30,67 @@ All source files are in [`Data/`](Data/):
 - `cultivation.csv` and `officer_portfolios.csv` — cultivation assignments and
   portfolio metadata
 
-The data dictionaries in `Data/` describe fields, grain, relationships, and
-synthetic-data conventions.
+The data dictionaries in [`docs/`](docs/) describe fields, grain,
+relationships, and synthetic-data conventions.
+
+## Synthetic classroom data
+
+The files in `tables/` are synthetic classroom data created for this project;
+they do not contain real PBS donor records. This public repository may include
+those project tables, but no real PBS donor data or other sensitive production
+data should be added to it.
+
+Several currently tracked large raw files use Git LFS. A clone intended to
+render the notebook therefore needs Git LFS installed and enabled before the
+tables are retrieved:
+
+```bash
+git lfs install
+git lfs pull
+```
+
+The repository's `.gitignore` prevents new raw CSVs and local artifacts from
+being added. It does not remove files already tracked by Git; those remain
+tracked until they are deliberately removed from the index and, if appropriate,
+repository history.
 
 ## Run or render the EDA
 
-The analysis is in [`eda_pbs_utah.qmd`](eda_pbs_utah.qmd). It uses R packages
-including `tidyverse`, `janitor`, `skimr`, `naniar`, `lubridate`, and `here`.
+The notebooks require the R packages `tidyverse`, `janitor`, `skimr`, `naniar`,
+`lubridate`, `here`, `glmnet`, `rpart`, `logistf`, and `knitr`.
 
 1. Install [Quarto](https://quarto.org/docs/get-started/) and R.
 2. In R, install any missing packages:
 
    ```r
-   install.packages(c("tidyverse", "janitor", "skimr", "naniar", "lubridate", "here"))
+   install.packages(c(
+     "tidyverse", "janitor", "skimr", "naniar", "lubridate", "here",
+     "glmnet", "rpart", "logistf", "knitr"
+   ))
    ```
 
-3. From the project root, render the document:
+3. From the project root, render the desired notebook:
 
    ```bash
    quarto render eda_pbs_utah.qmd
+   quarto render pbs_utah_modeling.qmd
    ```
 
-The document constructs 12-month and longer-term conversion targets, time-aware
-giving-history, campaign, and Passport features, and a joined donor-year
-candidate feature table. It does not fit or validate a predictive model.
+The EDA notebook constructs the cleaned household-aware donor-year inputs and
+documents descriptive findings. The modeling notebook applies training-only
+preprocessing and rolling fiscal-year evaluation to active never-major
+prospecting, current-major retention risk, and former-major reactivation.
 
 ## Key data-cleaning rules
 
 - Preserve source files unchanged; create separate cleaned objects in R.
 - Standardize identifiers as character values and parse dates explicitly.
 - Use a July--June fiscal year: FY2026 runs from July 2025 through June 2026.
-- Remove only confirmed exact duplicate records and retain an audit trail.
-- Retain `SYN-ORPHAN` records for audit, but exclude them from the individual
-  modeling population because they do not link to a constituent.
-- Retain zero-dollar records in raw audit tables while excluding them from
-  annual giving-dollar totals.
+- Remove transaction copies only through documented content-based valid-twin
+  checks and retain an audit trail; synthetic labels are audit-only.
+- Retain all campaign-member rows because repeats can be valid solicitations.
+- Exclude organization payments from individual direct-payment construction and
+  add soft credits to the individual recipient without double counting.
 - Allocate legacy household gifts to the primary linked constituent only and
   document this limitation.
 - Aggregate giving, campaign, and Passport records to one constituent--fiscal-
